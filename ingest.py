@@ -1,7 +1,9 @@
+print("📥 INGEST SCRIPT STARTED")
 import os
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 import chromadb
+
 
 DATA_DIR = "data/policies"
 DB_DIR = "vector_db"
@@ -60,5 +62,9 @@ for file in os.listdir(DATA_DIR):
             )
             doc_count += 1
 
-client.persist()
+persist_directory="./vector_db"
+
 print(f"Ingested {doc_count} chunks.")
+
+print("📊 Total documents stored:", doc_count)
+print("📁 Vector DB path:", os.path.abspath("./vector_db"))
