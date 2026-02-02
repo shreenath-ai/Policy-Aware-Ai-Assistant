@@ -22,7 +22,8 @@ client = chromadb.Client(
     )
 )
 
-collection = client.get_or_create_collection(COLLECTION)
+
+collection = client.get_or_create_collection(name="policies")
 
 def chunk_text(text, size, overlap):
     chunks = []
@@ -68,3 +69,5 @@ print(f"Ingested {doc_count} chunks.")
 
 print("📊 Total documents stored:", doc_count)
 print("📁 Vector DB path:", os.path.abspath("./vector_db"))
+
+
