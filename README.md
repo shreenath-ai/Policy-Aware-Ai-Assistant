@@ -15,3 +15,4 @@ pip install -r requirements.txt
 python ingest.py
 streamlit run app.py
 
+Evaluation is performed using a manually curated local test set (`tests.py`) covering valid, ambiguous, and out-of-scope queries.
