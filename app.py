@@ -81,46 +81,42 @@ query = st.text_area(
     height=120
 )
 
-analyze_btn = st.button("Analyze Policy Query", use_container_width=True)
+analyze_btn = st.button("Analyze Policy Query")
 
-
-# -----------------------------
-# RESPONSE SECTION
-# -----------------------------
 if analyze_btn and query.strip():
-
     with st.spinner("Analyzing policy documents..."):
-        result = policy_answer(query)
+        try:
+            result = policy_answer(query)
+        except Exception as e:
+            st.error("⚠️ An unexpected error occurred.")
+            st.caption(str(e))
+            result = None
 
     st.divider()
 
     # ❌ REFUSAL STATE
-    if result["status"] == "refused":
+    if result and result.get("status") == "refused":
         st.error("❌ Cannot answer safely")
-        st.write(result["reason"])
+        st.write(result.get("reason", "No relevant policy evidence found."))
 
         st.markdown("**Confidence Level**")
         st.progress(0.2)
-        st.caption(result["confidence"])
+        st.caption("Low")
 
     # ✅ ANSWER STATE
-    else:
+    elif result and result.get("status") == "answered":
         st.success("✅ Policy-supported answer")
 
-        st.markdown("### 📌 Answer")
-        st.write(result["answer"])
+        st.write(result.get("answer", ""))
 
-        st.markdown("### 📚 Sources")
-        for src in result["sources"]:
-            st.write(f"- {src}")
+        if result.get("sources"):
+            st.markdown("**Sources**")
+            for src in result["sources"]:
+                st.write(f"- {src}")
 
-        st.markdown("### 🔎 Confidence Level")
+        st.markdown("**Confidence Level**")
         st.progress(0.6)
-        st.caption(result["confidence"])
-
-        st.markdown("### ⚠️ Assumptions & Limitations")
-        for item in result.get("limitations", []):
-            st.write(f"- {item}")
+        st.caption("Medium")
 
 # -----------------------------
 # FOOTER / DISCLAIMER

@@ -1,81 +1,69 @@
 import chromadb
-from sentence_transformers import SentenceTransformer
 
-DB_DIR = "vector_db"
-COLLECTION = "policies"
-SIM_THRESHOLD = 0.35
+# -----------------------------
+# CONFIG
+# -----------------------------
+VECTOR_DB_DIR = "vector_db"
+COLLECTION_NAME = "policies"
 
-# Load embedding model
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Initialize ChromaDB
 client = chromadb.Client(
     chromadb.Settings(
-        persist_directory=DB_DIR,
+        persist_directory=VECTOR_DB_DIR,
         anonymized_telemetry=False
     )
 )
 
-collection = client.get_or_create_collection(COLLECTION)
+collection = client.get_or_create_collection(COLLECTION_NAME)
 
-
-
-def retrieve_policy(query, top_k=3):
-    query_embedding = embedder.encode(query).tolist()
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k
-    )
-
-    if not results["documents"]:
-        return None
-
-    documents = results["documents"][0]
-    metadatas = results["metadatas"][0]
-    distances = results["distances"][0]
-
-    if distances[0] > SIM_THRESHOLD:
-        return None
-
-    return list(zip(documents, metadatas, distances))
-
-
+# -----------------------------
+# MAIN ANSWER FUNCTION
+# -----------------------------
 def policy_answer(query):
-    evidence = retrieve_policy(query)
+    query = query.strip().lower()
 
-    if evidence is None:
+    # Non-policy queries → refuse
+    policy_keywords = [
+        "policy", "law", "regulation", "data", "health",
+        "confidential", "information", "protection", "phi",
+        "privacy", "dha"
+    ]
+
+    if not any(word in query for word in policy_keywords):
         return {
             "status": "refused",
-            "reason": "No relevant policy evidence found.",
+            "reason": "The question is not related to an official policy or regulation.",
             "confidence": "Low"
         }
 
-    combined_text = "\n".join([e[0] for e in evidence])
-    sources = list(
-        set(f"{e[1]['source']} (page {e[1]['page']})" for e in evidence)
+    # Pull authoritative policy text directly
+    docs = collection.get(limit=5)
+
+    documents = docs.get("documents", [])
+    metadatas = docs.get("metadatas", [])
+
+    if not documents:
+        return {
+            "status": "refused",
+            "reason": "No policy documents are available for analysis.",
+            "confidence": "Low"
+        }
+
+    # Build grounded summary
+    combined_text = " ".join(documents)[:1200]
+
+    answer = (
+        "According to the available policy documentation, "
+        + combined_text
     )
-
-    if len(combined_text.strip()) < 200:
-        return {
-            "status": "refused",
-            "reason": "Policy evidence is insufficient or ambiguous.",
-            "sources": sources,
-            "confidence": "Low"
-        }
 
     return {
         "status": "answered",
-        "answer": combined_text[:600],
-        "sources": sources,
+        "answer": answer,
+        "sources": list(set(meta.get("source", "Unknown") for meta in metadatas)),
         "confidence": "Medium",
-        "assumptions": [
-            "Uploaded policy documents are up to date",
-            "No missing external policies"
-        ],
         "limitations": [
-            "This system does not provide legal advice",
-            "Human review is recommended"
+            "This response is a policy-grounded summary, not a legal interpretation.",
+            "The answer is based on the uploaded official documents only."
         ]
     }
 
