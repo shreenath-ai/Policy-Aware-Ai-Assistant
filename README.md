@@ -1,7 +1,7 @@
 ## Policy-Aware AI Assistant
 
-This project demonstrates a trustworthy AI system that answers
-policy-related questions **only when supported by official documents**.
+> DDS AI Application Challenge – Final Submission
+
 
 ### Key Features
 - Policy document ingestion (PDFs)

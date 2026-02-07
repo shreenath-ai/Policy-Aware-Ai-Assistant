@@ -1,73 +1,102 @@
-print("📥 INGEST SCRIPT STARTED")
 import os
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 import chromadb
 
+# -----------------------------
+# CONFIG
+# -----------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+VECTOR_DB_DIR = os.path.join(BASE_DIR, "vector_db")
+COLLECTION_NAME = "policies"
 
-DATA_DIR = "data/policies"
-DB_DIR = "vector_db"
-COLLECTION = "policies"
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 100
 
-CHUNK_SIZE = 800
-OVERLAP = 100
-
-print("Loading embedding model...")
+# -----------------------------
+# INITIALIZE EMBEDDINGS & DB
+# -----------------------------
+print("🔃Loading embedding model...")
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 client = chromadb.Client(
     chromadb.Settings(
-        persist_directory=DB_DIR,
+        persist_directory=VECTOR_DB_DIR,
         anonymized_telemetry=False
     )
 )
 
+collection = client.get_or_create_collection(COLLECTION_NAME)
 
-collection = client.get_or_create_collection(name="policies")
-
+# -----------------------------
+# HELPER FUNCTIONS
+# -----------------------------
 def chunk_text(text, size, overlap):
     chunks = []
     start = 0
     while start < len(text):
-        chunks.append(text[start:start+size])
+        end = start + size
+        chunks.append(text[start:end])
         start += size - overlap
     return chunks
 
+
+def load_text_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def load_pdf_text(path):
+    text = ""
+    reader = PdfReader(path)
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text + "\n"
+    return text
+
+
+# -----------------------------
+# INGESTION PIPELINE
+# -----------------------------
 doc_count = 0
 
-for file in os.listdir(DATA_DIR):
-    if not file.endswith(".pdf"):
-        continue
+for root, _, files in os.walk(DATA_DIR):
+    for file in files:
+        file_path = os.path.join(root, file)
 
-    print(f"Reading {file}")
-    reader = PdfReader(os.path.join(DATA_DIR, file))
+        # Load text based on file type
+        if file.endswith(".txt"):
+            print(f"Loading TEXT file: {file}")
+            text = load_text_file(file_path)
 
-    for page_num, page in enumerate(reader.pages):
-        text = page.extract_text()
-        if not text:
+        elif file.endswith(".pdf"):
+            print(f"Loading PDF file: {file}")
+            text = load_pdf_text(file_path)
+
+        else:
             continue
 
-        chunks = chunk_text(text, CHUNK_SIZE, OVERLAP)
+        if not text or len(text.strip()) < 200:
+            print(f"Skipping empty or unreadable file: {file}")
+            continue
+
+        # Chunk text
+        chunks = chunk_text(text, CHUNK_SIZE, CHUNK_OVERLAP)
 
         for i, chunk in enumerate(chunks):
-            emb = embedder.encode(chunk).tolist()
+            embedding = embedder.encode(chunk).tolist()
 
             collection.add(
                 documents=[chunk],
-                embeddings=[emb],
+                embeddings=[embedding],
                 metadatas=[{
                     "source": file,
-                    "page": page_num + 1
+                    "path": file_path
                 }],
-                ids=[f"{file}_{page_num}_{i}"]
+                ids=[f"{file}_{i}"]
             )
             doc_count += 1
 
-persist_directory="./vector_db"
-
-print(f"Ingested {doc_count} chunks.")
-
-print("📊 Total documents stored:", doc_count)
-print("📁 Vector DB path:", os.path.abspath("./vector_db"))
-
-
+print(f"Ingestion complete. Total chunks ingested: {collection.count()}")

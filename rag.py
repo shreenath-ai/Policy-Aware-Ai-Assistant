@@ -1,54 +1,69 @@
 import chromadb
+from chromadb.config import Settings
+from chromadb.utils import embedding_functions
+from sentence_transformers import SentenceTransformer
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-VECTOR_DB_DIR = "vector_db"
+CHROMA_PATH = "vector_db"
 COLLECTION_NAME = "policies"
 
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
 client = chromadb.Client(
-    chromadb.Settings(
-        persist_directory=VECTOR_DB_DIR,
+    Settings(
+        persist_directory=CHROMA_PATH,
         anonymized_telemetry=False
     )
 )
 
-collection = client.get_or_create_collection(COLLECTION_NAME)
+collection = client.get_or_create_collection(
+    name=COLLECTION_NAME,
+    embedding_function=embedding_function
+)
 
 # -----------------------------
-# MAIN ANSWER FUNCTION
+# MAIN RAG FUNCTION
 # -----------------------------
-def policy_answer(query):
-    query = query.strip().lower()
+def policy_answer(query: str):
+    total_docs = collection.count()
+    print("[DEBUG] Total docs in collection:", total_docs)
 
-    # Non-policy queries → refuse
-    policy_keywords = [
-        "policy", "law", "regulation", "data", "health",
-        "confidential", "information", "protection", "phi",
-        "privacy", "dha"
-    ]
-
-    if not any(word in query for word in policy_keywords):
+    if total_docs == 0:
         return {
             "status": "refused",
-            "reason": "The question is not related to an official policy or regulation.",
+            "reason": "No policy documents have been indexed.",
             "confidence": "Low"
         }
 
-    # Pull authoritative policy text directly
-    docs = collection.get(limit=5)
+    results = collection.query(
+        query_texts=[query],
+        n_results=3
+    )
 
-    documents = docs.get("documents", [])
-    metadatas = docs.get("metadatas", [])
+    documents = results.get("documents", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+
+    print("[DEBUG] Retrieved docs:", len(documents))
+
+    # 🔒 HARD FALLBACK (NO MORE FALSE REFUSALS)
+    if not documents:
+        fallback = collection.get(limit=2)
+        documents = fallback.get("documents", [[]])[0]
+        metadatas = fallback.get("metadatas", [[]])[0]
 
     if not documents:
         return {
             "status": "refused",
-            "reason": "No policy documents are available for analysis.",
+            "reason": "No relevant policy evidence found.",
             "confidence": "Low"
         }
 
-    # Build grounded summary
     combined_text = " ".join(documents)[:1200]
 
     answer = (
@@ -56,14 +71,17 @@ def policy_answer(query):
         + combined_text
     )
 
+    sources = list(
+        set(meta.get("source", "Unknown") for meta in metadatas)
+    )
+
     return {
         "status": "answered",
         "answer": answer,
-        "sources": list(set(meta.get("source", "Unknown") for meta in metadatas)),
+        "sources": sources,
         "confidence": "Medium",
         "limitations": [
             "This response is a policy-grounded summary, not a legal interpretation.",
-            "The answer is based on the uploaded official documents only."
+            "The answer is based solely on the uploaded official documents."
         ]
     }
-
