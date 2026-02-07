@@ -1,87 +1,50 @@
-import chromadb
-from chromadb.config import Settings
-from chromadb.utils import embedding_functions
-from sentence_transformers import SentenceTransformer
+import os
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-CHROMA_PATH = "vector_db"
-COLLECTION_NAME = "policies"
+POLICY_FILE = "policies/dha_policy.txt"
 
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+KEYWORDS = [
+    "phi",
+    "protected health information",
+    "confidential",
+    "confidentiality",
+    "health data",
+    "dha"
+]
 
-embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-client = chromadb.Client(
-    Settings(
-        persist_directory=CHROMA_PATH,
-        anonymized_telemetry=False
-    )
-)
-
-collection = client.get_or_create_collection(
-    name=COLLECTION_NAME,
-    embedding_function=embedding_function
-)
-
-# -----------------------------
-# MAIN RAG FUNCTION
-# -----------------------------
 def policy_answer(query: str):
-    total_docs = collection.count()
-    print("[DEBUG] Total docs in collection:", total_docs)
-
-    if total_docs == 0:
+    if not os.path.exists(POLICY_FILE):
         return {
             "status": "refused",
-            "reason": "No policy documents have been indexed.",
+            "reason": "No policy documents available for analysis.",
             "confidence": "Low"
         }
 
-    results = collection.query(
-        query_texts=[query],
-        n_results=3
-    )
+    with open(POLICY_FILE, "r", encoding="utf-8") as f:
+        policy_text = f.read().lower()
 
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
+    query_lower = query.lower()
 
-    print("[DEBUG] Retrieved docs:", len(documents))
-
-    # 🔒 HARD FALLBACK (NO MORE FALSE REFUSALS)
-    if not documents:
-        fallback = collection.get(limit=2)
-        documents = fallback.get("documents", [[]])[0]
-        metadatas = fallback.get("metadatas", [[]])[0]
-
-    if not documents:
+    # Check if query is policy-related
+    if not any(keyword in query_lower for keyword in KEYWORDS):
         return {
             "status": "refused",
-            "reason": "No relevant policy evidence found.",
+            "reason": "Query is not related to available policy documents.",
             "confidence": "Low"
         }
 
-    combined_text = " ".join(documents)[:1200]
-
+    # Build grounded answer
     answer = (
-        "According to the available policy documentation, "
-        + combined_text
-    )
-
-    sources = list(
-        set(meta.get("source", "Unknown") for meta in metadatas)
+        "According to the DHA Health Data Protection and Confidentiality Policy, "
+        + policy_text[:900]
     )
 
     return {
         "status": "answered",
         "answer": answer,
-        "sources": sources,
+        "sources": ["dha_policy.txt"],
         "confidence": "Medium",
         "limitations": [
-            "This response is a policy-grounded summary, not a legal interpretation.",
-            "The answer is based solely on the uploaded official documents."
+            "This response is generated from the uploaded policy document.",
+            "This is not legal or regulatory advice."
         ]
     }
